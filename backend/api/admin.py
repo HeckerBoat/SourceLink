@@ -1,7 +1,8 @@
-"""管理后台接口：资源块 CRUD、站点配置、访问记录。"""
+"""管理后台接口：资源块 CRUD、站点配置、访问记录、用户管理。"""
 
-from flask import Blueprint, g
+from flask import Blueprint, g, request
 
+from ..services import auth as auth_service
 from ..services import resource as resource_service
 from ..services import site_config
 from .common import fail, get_json, ok, require_auth
@@ -89,6 +90,44 @@ def update_config():
             data[key] = str(value)
     config = site_config.update_config(g.session, data)
     return ok(config, "配置已保存")
+
+
+# ---------------- 用户管理（新建 / 查看 / 编辑 / 删除客户账户） ----------------
+
+@bp.get("/admin/users")
+@require_auth(admin=True)
+def list_users():
+    return ok(auth_service.admin_list_users(g.session, request.args.get("keyword", "")))
+
+
+@bp.post("/admin/users")
+@require_auth(admin=True)
+def create_user():
+    try:
+        user = auth_service.admin_create_user(g.session, get_json())
+    except auth_service.AuthError as exc:
+        return fail(str(exc))
+    return ok(auth_service.serialize_user(user), "创建成功")
+
+
+@bp.put("/admin/users/<int:user_id>")
+@require_auth(admin=True)
+def update_user(user_id: int):
+    try:
+        user = auth_service.admin_update_user(g.session, user_id, get_json())
+    except auth_service.AuthError as exc:
+        return fail(str(exc))
+    return ok(auth_service.serialize_user(user), "更新成功")
+
+
+@bp.delete("/admin/users/<int:user_id>")
+@require_auth(admin=True)
+def delete_user(user_id: int):
+    try:
+        auth_service.admin_delete_user(g.session, user_id)
+    except auth_service.AuthError as exc:
+        return fail(str(exc))
+    return ok(msg="删除成功")
 
 
 # ---------------- 访问记录 ----------------

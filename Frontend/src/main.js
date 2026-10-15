@@ -6,6 +6,7 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 
 import App from './App.vue'
 import router from './router'
+import { useAuthStore } from './stores/auth'
 
 import 'element-plus/dist/index.css'
 import './styles/main.css'
@@ -19,5 +20,8 @@ for (const [name, component] of Object.entries(ElementPlusIconsVue)) {
 app.use(createPinia())
 app.use(router)
 app.use(ElementPlus, { locale: zhCn })
+
+// 启动时同步 Cookie 会话对应的用户信息（会话过期会自动清空本地缓存）
+useAuthStore().fetchMe()
 
 app.mount('#app')

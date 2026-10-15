@@ -35,22 +35,28 @@ def send_sms(phone: str, code: str) -> None:
 
 def send_email(to_email: str, code: str) -> None:
     site_name = site_config.get_config("site_name") or "SourceLink"
+    # 验证码有效期（分钟）与站点配置 code_ttl_seconds 保持一致
+    try:
+        minutes = max(1, int(int(site_config.get_config("code_ttl_seconds") or 300) / 60))
+    except (TypeError, ValueError):
+        minutes = 5
 
     if not Config.SMTP_ENABLED or not Config.SMTP_HOST:
-        logger.info("【邮箱验证码(console)】邮箱=%s 验证码=%s 5分钟内有效", to_email, code)
-        print(f"\n[EMAIL-console] 向邮箱 {to_email} 发送验证码: {code} (5 分钟内有效)\n")
+        logger.info("【邮箱验证码(console)】邮箱=%s 验证码=%s %s分钟内有效", to_email, code, minutes)
+        print(f"\n[EMAIL-console] 向邮箱 {to_email} 发送验证码: {code} ({minutes} 分钟内有效)\n")
         return
 
+    # 需求规定邮件模板：主题「资源链接验证码」，
+    # 内容「您的邮箱验证码是[xxxxxx]，有效期xx分钟，请及时验证！」
     html = f"""\
     <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:480px;margin:auto;
                 border:1px solid #eaeaea;border-radius:12px;padding:32px;color:#333;">
       <h2 style="margin-top:0;color:#4f46e5;">{site_name}</h2>
-      <p>您正在注册账号，验证码为：</p>
-      <p style="font-size:28px;font-weight:700;letter-spacing:6px;color:#111;">{code}</p>
-      <p style="color:#888;font-size:13px;">验证码 5 分钟内有效，请勿泄露给他人。如非本人操作请忽略此邮件。</p>
+      <p style="font-size:15px;">您的邮箱验证码是[<b style="font-size:26px;letter-spacing:4px;color:#111;">{code}</b>]，有效期{minutes}分钟，请及时验证！</p>
+      <p style="color:#888;font-size:13px;">请勿泄露给他人。如非本人操作请忽略此邮件。</p>
     </div>
     """
-    _send_html(to_email, f"【{site_name}】注册验证码", html)
+    _send_html(to_email, "资源链接验证码", html)
 
     logger.info("邮箱验证码已通过 SMTP 发送至 %s", to_email)
 

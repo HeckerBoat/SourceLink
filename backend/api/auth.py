@@ -1,4 +1,4 @@
-"""认证相关接口：公开配置、注册、登录、当前用户。"""
+"""认证相关接口：公开配置、注册、登录、退出登录、忘记密码、当前用户。"""
 
 from flask import Blueprint, current_app, g, request
 from sqlmodel import Session
@@ -7,12 +7,28 @@ from ..database import engine
 from ..services import auth as auth_service
 from ..services import captcha, site_config
 from ..services import notifier
-from .common import fail, get_json, ok, require_auth
+from ..services import user_session as session_service
+from .common import (
+    clear_session_cookie,
+    current_session_token,
+    fail,
+    get_json,
+    ok,
+    require_auth,
+    set_session_cookie,
+)
 
 bp = Blueprint("auth", __name__)
 
 # 业务码：需要滑动验证码（新设备首次登录）
 CODE_NEED_CAPTCHA = 4011
+
+
+def _login_response(user_id: int, user_data: dict, session_token: str, msg: str):
+    """登录/注册成功响应：通过 HttpOnly Cookie 下发服务端会话标识。"""
+    response = ok({"user": user_data}, msg)
+    set_session_cookie(response, session_token)
+    return response
 
 
 @bp.get("/config/public")
@@ -42,12 +58,13 @@ def register():
             # 注册即登录：当前设备记为可信设备，之后登录不再要求滑动验证
             if device_id:
                 auth_service.trust_device(session, user.id, device_id, request.headers.get("User-Agent", ""))
-            payload = auth_service.issue_token(user)
+            record = session_service.create_session(session, user.id)
+            user_id, user_data = user.id, auth_service.serialize_user(user)
         except Exception as exc:
             return fail(str(exc))
 
     current_app.logger.info("新用户注册成功: %s (%s)", target, channel)
-    return ok(payload, "注册成功")
+    return _login_response(user_id, user_data, record.token, "注册成功")
 
 
 @bp.post("/auth/login")
@@ -80,11 +97,41 @@ def login():
                 device_desc=device_desc,
                 ip=request.remote_addr or "未知",
             )
-
-        payload = auth_service.issue_token(user)
-        if trusted is not None:
+        else:
             auth_service.trust_device(session, user.id, device_id)
-    return ok(payload, "登录成功")
+
+        record = session_service.create_session(session, user.id)
+        user_id, user_data = user.id, auth_service.serialize_user(user)
+
+    return _login_response(user_id, user_data, record.token, "登录成功")
+
+
+@bp.post("/auth/logout")
+def logout():
+    """退出登录：删除服务端会话并清除浏览器 Cookie。"""
+    with Session(engine) as session:
+        session_service.delete_session(session, current_session_token())
+    response = ok(msg="已退出登录")
+    clear_session_cookie(response)
+    return response
+
+
+@bp.post("/auth/forgot-password")
+def forgot_password():
+    """忘记密码：邮箱验证码（purpose=reset_password）校验通过后重置密码。"""
+    data = get_json()
+    try:
+        with Session(engine) as session:
+            user = auth_service.reset_password(
+                session,
+                data.get("email", ""),
+                (data.get("code") or "").strip(),
+                data.get("password") or "",
+            )
+    except auth_service.AuthError as exc:
+        return fail(str(exc))
+    current_app.logger.info("用户通过忘记密码重置密码: user_id=%s email=%s", user.id, user.email)
+    return ok(msg="密码已重置，请使用新密码登录")
 
 
 def jsonify_need_captcha():

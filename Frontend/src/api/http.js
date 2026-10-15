@@ -1,28 +1,16 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
-const TOKEN_KEY = 'sl_token'
-
+// 登录态由 HttpOnly Cookie 维持（需求 10：cookie 存储登录信息，不采用令牌校验），
+// 请求只需携带 Cookie，无需手动附加任何令牌头
 const http = axios.create({
   baseURL: '/api',
   timeout: 15000,
-})
-
-http.interceptors.request.use((config) => {
-  const token = localStorage.getItem(TOKEN_KEY)
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
+  withCredentials: true,
 })
 
 http.interceptors.response.use(
   (response) => {
-    // 会话滑动续期：后端在令牌剩余不足一半时通过该头下发新令牌
-    const fresh = response.headers?.['x-refresh-token']
-    if (fresh) {
-      localStorage.setItem(TOKEN_KEY, fresh)
-    }
     const body = response.data
     if (body && typeof body === 'object' && 'code' in body) {
       if (body.code === 0) {
@@ -43,8 +31,8 @@ http.interceptors.response.use(
     const status = error.response?.status
     const msg = error.response?.data?.msg
     if (status === 401) {
+      // 会话空闲超时或被强制下线：清除本地缓存的登录信息并跳转登录页
       ElMessage.error(msg || '登录已失效，请重新登录')
-      localStorage.removeItem(TOKEN_KEY)
       localStorage.removeItem('sl_user')
       if (!location.hash.startsWith('#/login')) {
         location.hash = '#/login'

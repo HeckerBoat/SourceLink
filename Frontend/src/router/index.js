@@ -23,6 +23,7 @@ const router = createRouter({
           redirect: '/admin/resources',
           children: [
             { path: 'resources', name: 'admin-resources', component: () => import('@/views/admin/Resources.vue') },
+            { path: 'users', name: 'admin-users', component: () => import('@/views/admin/Users.vue') },
             { path: 'settings', name: 'admin-settings', component: () => import('@/views/admin/Settings.vue') },
             { path: 'logs', name: 'admin-logs', component: () => import('@/views/admin/Logs.vue') },
             { path: 'feedback', name: 'admin-feedback', component: () => import('@/views/Feedback.vue') },

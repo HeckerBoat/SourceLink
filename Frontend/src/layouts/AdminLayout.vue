@@ -5,6 +5,9 @@
         <el-menu-item index="/admin/resources">
           <el-icon><Files /></el-icon><span>资源块管理</span>
         </el-menu-item>
+        <el-menu-item index="/admin/users">
+          <el-icon><User /></el-icon><span>用户管理</span>
+        </el-menu-item>
         <el-menu-item index="/admin/settings">
           <el-icon><Tools /></el-icon><span>站点配置</span>
         </el-menu-item>

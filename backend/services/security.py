@@ -1,4 +1,4 @@
-"""安全工具：密码二次哈希与 JWT 令牌。
+"""安全工具：密码二次哈希。
 
 二次哈希策略：
 1. 第一层使用服务端 pepper 对明文密码做 SHA-256（防止数据库泄露后被直接彩虹表破解）；
@@ -9,14 +9,10 @@
 
 import hashlib
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any
 
-import jwt
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from ..config import Config
-from . import site_config
 
 logger = logging.getLogger(__name__)
 
@@ -39,23 +35,3 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def create_access_token(user_id: int, is_admin: bool) -> str:
-    """签发会话令牌，有效期 = 会话空闲时长（数据库 session_idle_minutes，默认 60 分钟）。
-
-    每次携带令牌的成功请求会在剩余有效期不足一半时自动续期
-    （通过响应头下发新令牌），从而实现“无操作 N 小时失效、活跃不掉线”。
-    """
-    now = datetime.now(timezone.utc)
-    payload: dict[str, Any] = {
-        "sub": str(user_id),
-        "is_admin": is_admin,
-        "iat": int(now.timestamp()),
-        "exp": now + timedelta(minutes=site_config.session_idle_minutes()),
-    }
-    return jwt.encode(payload, Config.SECRET_KEY, algorithm=Config.JWT_ALGORITHM)
-
-
-def decode_access_token(token: str) -> dict[str, Any]:
-    return jwt.decode(token, Config.SECRET_KEY, algorithms=[Config.JWT_ALGORITHM])

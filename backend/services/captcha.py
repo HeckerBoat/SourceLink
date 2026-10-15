@@ -24,7 +24,7 @@ from ..models import CaptchaRecord
 # 画布与拼图块尺寸（前端按 300x150 的逻辑分辨率缩放显示，坐标同比例换算）
 BG_W, BG_H = 300, 150
 BLOCK = 44          # 拼图方块边长
-TOLERANCE = 6       # 横坐标校验容差（逻辑像素）
+HALF_ALIGN_RATIO = 0.5  # 需求规定：滑块对齐一半（横坐标偏差不超过目标的一半）即验证成功
 CHALLENGE_TTL = 300  # 挑战有效期 5 分钟
 TICKET_TTL = 300     # 凭证有效期 5 分钟
 
@@ -145,7 +145,9 @@ def verify_challenge(session: Session, challenge_id: str, drag_x: float) -> str:
     record.consumed_at = datetime.now(timezone.utc)
     session.add(record)
 
-    if abs(float(drag_x) - float(record.answer_x)) > TOLERANCE:
+    # 对齐一半即判定成功：横坐标偏差不超过目标坐标的一半
+    answer = float(record.answer_x)
+    if abs(float(drag_x) - answer) > answer * HALF_ALIGN_RATIO:
         session.commit()
         raise CaptchaError("未对准缺口，请重试")
 

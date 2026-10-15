@@ -56,8 +56,8 @@ function onCommand(command) {
   else if (command === 'admin') router.push('/admin/resources')
   else if (command === 'logout') {
     ElMessageBox.confirm('确定要退出登录吗？', '提示', { type: 'warning', confirmButtonText: '退出', cancelButtonText: '取消' })
-      .then(() => {
-        auth.logout()
+      .then(async () => {
+        await auth.logout() // 删除服务端会话并清除 Cookie
         router.push('/login')
       })
       .catch(() => {})

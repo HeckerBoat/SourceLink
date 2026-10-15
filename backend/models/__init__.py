@@ -7,6 +7,7 @@ from .resource import ResourceBlock
 from .site_config import SiteConfig
 from .trusted_device import TrustedDevice
 from .user import User
+from .user_session import UserSession
 from .verification import VerificationCode
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "SiteConfig",
     "TrustedDevice",
     "User",
+    "UserSession",
     "VerificationCode",
 ]

@@ -5,7 +5,7 @@ A commercial virtual-resource hosting platform. Admins maintain resource blocks
 console; registered users browse the marketplace and must enter the block
 password to reveal each resource's cloud-drive link.
 
-- Backend: Python Flask (SQLModel over SQLite, JWT auth)
+- Backend: Python Flask (SQLModel over SQLite, cookie + server-side session auth)
 - Frontend: Vue 3 + Vite + Element Plus + Pinia
 - Decoupled development, single entry point in production (Flask serves the built UI)
 
@@ -23,15 +23,25 @@ password to reveal each resource's cloud-drive link.
   then sign in with username / phone / email.
 - **Slider captcha**: registration and first login from a new device require a
   drag-to-fill puzzle captcha (randomly generated server-side with Pillow,
-  one-shot challenge + 5-minute ticket, ±6 px tolerance).
+  one-shot challenge + 5-minute ticket; aligning within half of the target is
+  enough to pass). Once verified, the captcha component is removed from the page.
+- **Forgot password**: the login page offers a "forgot password" flow that resets
+  the password via an email verification code; after a reset, every device is
+  forced to sign in again.
+- **User management**: admins can create, view, edit and delete customer accounts
+  (login identities, initial password, enable/disable, password reset). Resetting
+  a password or disabling an account kicks all of that user's devices offline;
+  the built-in admin account is protected from modification and deletion.
 - **New-device protection**: the first sign-in from an unknown device requires the
   slider captcha and triggers an email risk alert (time / IP / device info);
   later logins from the same device skip the captcha (trusted-device table).
-- **Idle session expiry**: tokens live for the `session_idle_minutes` site config
+- **Idle session expiry**: login state lives in a cookie (an HttpOnly cookie holds
+  a random session id that is verified against the server-side `user_session`
+  table — no login tokens). Sessions live for the `session_idle_minutes` site config
   (default 60, admin-adjustable between 5-10080 in the console, effective
   immediately; the `.env` value is only the first-run seed).
-  Active sessions are silently renewed via the `X-Refresh-Token` response header;
-  after N idle minutes the next request returns 401 and the UI redirects to login.
+  Active sessions past half their lifetime are silently renewed with a fresh cookie;
+  after N idle minutes the next request returns 401, the UI signs out and redirects to login.
 - **Profile page**: signed-in users can view account info and bind/change a phone
   number without an SMS code (format + uniqueness checks); accounts without an
   email can bind one after verifying an email code (`bind_email` purpose);
@@ -57,7 +67,7 @@ password to reveal each resource's cloud-drive link.
   existing SQLite tables to add missing columns (old data preserved); both
   operations back up the original file into `db/backups/` first.
 - **Security**: passwords are double-hashed (SHA-256 with a server pepper, then
-  salted PBKDF2-SHA256); JWT sessions; drive links are never exposed before unlock.
+  salted PBKDF2-SHA256); cookie + server-side sessions; drive links are never exposed before unlock.
 - **Mobile friendly**: responsive layout at 768 px breakpoint — single-column cards,
   collapsible admin menu, touch-friendly slider captcha.
 - **Error handling**: full stack traces are logged on the backend terminal; the UI
@@ -68,7 +78,7 @@ password to reveal each resource's cloud-drive link.
 | Layer | Tech |
 | --- | --- |
 | Frontend | Vue 3, Vue Router 4, Pinia, Element Plus, Axios, Vite 6 |
-| Backend | Flask 3, SQLModel / SQLAlchemy, PyJWT, Flask-Cors, python-dotenv, Pillow |
+| Backend | Flask 3, SQLModel / SQLAlchemy, Flask-Cors, python-dotenv, Pillow |
 | Database | SQLite (`db/sourcelink.db`) |
 | Tooling | uv (Python 3.12), npm |
 

@@ -1,12 +1,13 @@
-"""认证业务：注册、登录、可信设备、用户序列化。"""
+"""认证业务：注册、登录、忘记密码、可信设备、用户序列化、管理员用户管理。"""
 
 from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
 from ..models import TrustedDevice, User
+from . import user_session as session_service
 from . import verification
-from .security import create_access_token, hash_password, verify_password
+from .security import hash_password, verify_password
 
 
 class AuthError(Exception):
@@ -109,9 +110,26 @@ def authenticate(session: Session, account: str, password: str) -> User:
     return user
 
 
-def issue_token(user: User) -> dict:
-    token = create_access_token(user.id, user.is_admin)
-    return {"token": token, "user": serialize_user(user)}
+def reset_password(session: Session, email: str, code: str, password: str) -> User:
+    """忘记密码：邮箱验证码（purpose=reset_password）校验通过后重置密码，
+    并删除该用户全部登录会话，强制所有设备用新密码重新登录。"""
+    email = (email or "").strip()
+    if not verification.EMAIL_PATTERN.match(email):
+        raise AuthError("邮箱格式不正确")
+    if not password or len(password) < 6 or len(password) > 64:
+        raise AuthError("密码长度需为 6-64 位")
+    user = session.exec(select(User).where(User.email == email)).first()
+    if user is None:
+        raise AuthError("该邮箱未注册")
+    if not verification.verify_code(session, email, "email", code, purpose="reset_password"):
+        raise AuthError("验证码错误或已过期")
+    user.password_hash = hash_password(password)
+    user.updated_at = datetime.now(timezone.utc)
+    session.add(user)
+    session.commit()
+    session_service.delete_user_sessions(session, user.id)
+    session.refresh(user)
+    return user
 
 
 def normalize_device_id(device_id: str | None) -> str:
@@ -154,3 +172,125 @@ def trust_device(session: Session, user_id: int, device_id: str, device_name: st
     session.commit()
     session.refresh(record)
     return record
+
+
+# ---------------- 管理员用户管理（新建 / 查看 / 编辑 / 删除客户账户） ----------------
+
+def _check_unique(session: Session, field: str, value: str, exclude_id: int | None = None) -> None:
+    existed = session.exec(select(User).where(getattr(User, field) == value)).first()
+    if existed is not None and existed.id != exclude_id:
+        label = {"username": "用户名", "phone": "手机号", "email": "邮箱"}[field]
+        raise AuthError(f"该{label}已被占用")
+
+
+def admin_list_users(session: Session, keyword: str = "") -> list[dict]:
+    keyword = (keyword or "").strip()
+    query = select(User).order_by(User.created_at.desc())
+    if keyword:
+        query = query.where(
+            (User.username == keyword) | (User.phone == keyword) | (User.email == keyword)
+        )
+    return [serialize_user(u) for u in session.exec(query).all()]
+
+
+def admin_create_user(session: Session, data: dict) -> User:
+    """管理员新建客户账户：用户名 / 手机号 / 邮箱三选一作为登录账号 + 初始密码。"""
+    username = (data.get("username") or "").strip()
+    phone = (data.get("phone") or "").strip()
+    email = (data.get("email") or "").strip()
+    password = data.get("password") or ""
+
+    if not any([username, phone, email]):
+        raise AuthError("用户名、手机号、邮箱至少填写一项作为登录账号")
+    if not password or len(password) < 6 or len(password) > 64:
+        raise AuthError("密码长度需为 6-64 位")
+    if username and (len(username) > 64 or not username.replace("_", "").isalnum()):
+        raise AuthError("用户名仅支持字母、数字、下划线，最长 64 位")
+    if phone and not verification.PHONE_PATTERN.match(phone):
+        raise AuthError("手机号格式不正确")
+    if email and not verification.EMAIL_PATTERN.match(email):
+        raise AuthError("邮箱格式不正确")
+
+    for field, value in (("username", username), ("phone", phone), ("email", email)):
+        if value:
+            _check_unique(session, field, value)
+
+    user = User(
+        username=username or None,
+        phone=phone or None,
+        email=email or None,
+        password_hash=hash_password(password),
+        is_admin=False,
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+def _require_editable(target: User | None) -> User:
+    if target is None:
+        raise AuthError("用户不存在")
+    if target.is_admin:
+        raise AuthError("不能操作管理员账户")
+    return target
+
+
+def admin_update_user(session: Session, user_id: int, data: dict) -> User:
+    """管理员编辑客户账户：登录账号（用户名/手机号/邮箱）、状态、重置密码。"""
+    user = _require_editable(session.get(User, user_id))
+    changed = False
+
+    for field, label, pattern in (
+        ("username", "用户名", None),
+        ("phone", "手机号", verification.PHONE_PATTERN),
+        ("email", "邮箱", verification.EMAIL_PATTERN),
+    ):
+        if field not in data:
+            continue
+        value = (data.get(field) or "").strip()
+        if value:
+            if field == "username" and (len(value) > 64 or not value.replace("_", "").isalnum()):
+                raise AuthError("用户名仅支持字母、数字、下划线，最长 64 位")
+            if pattern is not None and not pattern.match(value):
+                raise AuthError(f"{label}格式不正确")
+            _check_unique(session, field, value, exclude_id=user.id)
+            setattr(user, field, value)
+        else:
+            # 用户名/手机号/邮箱允许清空，但三者不能同时为空
+            setattr(user, field, None)
+        changed = True
+
+    if not any([user.username, user.phone, user.email]):
+        raise AuthError("用户名、手机号、邮箱至少保留一项作为登录账号")
+
+    password = (data.get("password") or "").strip()
+    if password:
+        if len(password) < 6 or len(password) > 64:
+            raise AuthError("密码长度需为 6-64 位")
+        user.password_hash = hash_password(password)
+        changed = True
+
+    if "is_active" in data:
+        user.is_active = bool(data["is_active"])
+        changed = True
+
+    if changed:
+        user.updated_at = datetime.now(timezone.utc)
+        session.add(user)
+        session.commit()
+        # 重置密码或停用后强制重新登录
+        if password or not user.is_active:
+            session_service.delete_user_sessions(session, user.id)
+    session.refresh(user)
+    return user
+
+
+def admin_delete_user(session: Session, user_id: int) -> None:
+    """管理员删除客户账户：同时清理其登录会话与可信设备；反馈与访问记录保留为历史。"""
+    user = _require_editable(session.get(User, user_id))
+    session_service.delete_user_sessions(session, user.id)
+    for device in session.exec(select(TrustedDevice).where(TrustedDevice.user_id == user.id)).all():
+        session.delete(device)
+    session.delete(user)
+    session.commit()

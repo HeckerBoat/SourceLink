@@ -38,7 +38,7 @@
             @keyup.enter="onSubmit"
           />
         </el-form-item>
-        <el-form-item label="滑动验证">
+        <el-form-item v-if="!captchaPassed" label="滑动验证">
           <div class="captcha-slot">
             <SliderCaptcha ref="captchaRef" @verified="onCaptchaVerified" />
           </div>
@@ -80,6 +80,7 @@ const loading = ref(false)
 const sending = ref(false)
 const countdown = ref(0)
 const captchaTicket = ref('')
+const captchaPassed = ref(false) // 滑动验证通过后从前端去掉验证码组件（需求 7）
 let timer = null
 
 const form = reactive({
@@ -109,6 +110,7 @@ const rules = {
 
 function onCaptchaVerified(ticket) {
   captchaTicket.value = ticket
+  captchaPassed.value = true // 验证成功，去掉验证码组件
 }
 
 async function onSendCode() {
@@ -148,12 +150,13 @@ async function onSubmit() {
       captcha_ticket: captchaTicket.value,
       device_id: auth.deviceId(),
     })
-    auth.setAuth(data.token, data.user)
+    auth.setAuth(data.user)
     ElMessage.success('注册成功')
     router.push('/')
   } catch {
     // 失败后滑动验证凭证已消费，刷新重试
     captchaTicket.value = ''
+    captchaPassed.value = false
     captchaRef.value?.reset()
   } finally {
     loading.value = false

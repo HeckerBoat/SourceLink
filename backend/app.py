@@ -31,10 +31,11 @@ def create_app() -> Flask:
     # 建表 + 初始化管理员 / 默认配置（配置同步到内存缓存，相当于同步给前端）
     init_and_seed()
 
+    # Cookie 会话需要跨源携带凭证：开发环境放行 Vite 前端源；生产同源部署不涉及跨域
     CORS(
         app,
-        resources={r"/api/*": {"origins": "*"}},
-        expose_headers=["X-Refresh-Token"],
+        resources={r"/api/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}},
+        supports_credentials=True,
     )
 
     for blueprint in (auth_bp, captcha_bp, verification_bp, resource_bp, feedback_bp, admin_bp):
